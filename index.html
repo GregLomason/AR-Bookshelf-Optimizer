@@ -497,8 +497,43 @@
             canvas = document.getElementById('arCanvas');
             ctx = canvas.getContext('2d');
             
+            // Add touch interaction after canvas is initialized
+            setupTouchInteraction();
+            
             console.log('🚀 AR Bookshelf Optimizer initialized');
         });
+
+        function setupTouchInteraction() {
+            // Make sure canvas exists before adding event listener
+            if (!canvas) {
+                console.warn('⚠️ Canvas not ready for touch interaction');
+                return;
+            }
+            
+            // Touch interaction for AR suggestions
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // Prevent default touch behavior
+                
+                if (!isAnalyzing) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const touch = e.touches[0];
+                const x = (touch.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (touch.clientY - rect.top) * (canvas.height / rect.height);
+                
+                // Check if touch intersects with any AR suggestion
+                arSuggestions.forEach(suggestion => {
+                    if (x >= suggestion.x && x <= suggestion.x + 150 &&
+                        y >= suggestion.y - 12 && y <= suggestion.y + 12) {
+                        
+                        // Suggestion tapped - show feedback
+                        showSuggestionFeedback(suggestion);
+                    }
+                });
+            });
+            
+            console.log('👆 Touch interaction enabled');
+        }
 
         async function enableCamera() {
             try {
@@ -542,9 +577,14 @@
                 document.getElementById('arInterface').classList.remove('hidden');
 
                 console.log('✅ Camera enabled successfully');
+                console.log(`📐 Canvas dimensions: ${canvas.width}x${canvas.height}`);
                 
-                // Start real-time processing
-                startRealtimeProcessing();
+                // Small delay to ensure everything is ready
+                setTimeout(() => {
+                    startRealtimeProcessing();
+                    // Re-setup touch interaction now that canvas is fully ready
+                    setupTouchInteraction();
+                }, 100);
 
             } catch (error) {
                 console.error('❌ Camera error:', error);
@@ -567,7 +607,7 @@
 
         function startRealtimeProcessing() {
             function processFrame() {
-                if (isAnalyzing && video.videoWidth > 0 && video.videoHeight > 0) {
+                if (isAnalyzing && video && canvas && video.videoWidth > 0 && video.videoHeight > 0) {
                     // Clear previous overlays
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     
@@ -762,9 +802,10 @@
         // Handle screen orientation changes
         window.addEventListener('orientationchange', () => {
             setTimeout(() => {
-                if (canvas && video.videoWidth > 0) {
+                if (canvas && video && video.videoWidth > 0) {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    console.log(`📐 Canvas resized: ${canvas.width}x${canvas.height}`);
                 }
             }, 500);
         });
@@ -777,26 +818,6 @@
             if (animationFrame) {
                 cancelAnimationFrame(animationFrame);
             }
-        });
-
-        // Touch interaction for AR suggestions
-        canvas.addEventListener('touchstart', (e) => {
-            if (!isAnalyzing) return;
-            
-            const rect = canvas.getBoundingClientRect();
-            const touch = e.touches[0];
-            const x = (touch.clientX - rect.left) * (canvas.width / rect.width);
-            const y = (touch.clientY - rect.top) * (canvas.height / rect.height);
-            
-            // Check if touch intersects with any AR suggestion
-            arSuggestions.forEach(suggestion => {
-                if (x >= suggestion.x && x <= suggestion.x + 150 &&
-                    y >= suggestion.y - 12 && y <= suggestion.y + 12) {
-                    
-                    // Suggestion tapped - show feedback
-                    showSuggestionFeedback(suggestion);
-                }
-            });
         });
 
         function showSuggestionFeedback(suggestion) {
