@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Bookshelf Optimizer</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="ar-container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="arCanvas"></canvas>
+        
+        <div class="ar-ui">
+            <div class="top-bar">
+                <div class="app-title">AR Bookshelf Optimizer</div>
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span id="statusText">Live Analysis Active</span>
+                </div>
+            </div>
+
+            <div class="detection-info">
+                <h3>Detection Info</h3>
+                <div class="stat-item">
+                    <span class="stat-label">Books Found:</span>
+                    <span id="bookCount" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Space Used:</span>
+                    <span id="spaceUsed" class="stat-value">0%</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Potential Gain:</span>
+                    <span id="potentialGain" class="stat-value">+0%</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Method:</span>
+                    <span id="detectionMethod" class="stat-value">None</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="stopBtn" class="control-btn stop-btn">
+                    <span class="btn-icon">⏸</span>
+                    Stop Analysis
+                </button>
+                <button id="switchBtn" class="control-btn">
+                    <span class="btn-icon">🔄</span>
+                    Switch Camera
+                </button>
+                <button id="infoBtn" class="control-btn">
+                    <span class="btn-icon">ℹ</span>
+                    Info
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #000;
+    color: white;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+}
+
+.ar-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#arCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.ar-ui {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    pointer-events: none;
+}
+
+.top-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%);
+    padding: 50px 20px 20px 20px;
+    pointer-events: auto;
+}
+
+.app-title {
+    text-align: center;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: #4ade80;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    background: #4ade80;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.detection-info {
+    position: absolute;
+    top: 50%;
+    right: 20px;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 20px;
+    min-width: 200px;
+    pointer-events: auto;
+}
+
+.detection-info h3 {
+    color: #4ade80;
+    font-size: 1rem;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+.stat-label {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.stat-value {
+    color: #4ade80;
+    font-weight: 600;
+}
+
+.controls {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    pointer-events: auto;
+}
+
+.control-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 25px;
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 120px;
+    justify-content: center;
+}
+
+.control-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+}
+
+.control-btn:active {
+    transform: translateY(0);
+}
+
+.stop-btn {
+    background: rgba(239, 68, 68, 0.8);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.stop-btn:hover {
+    background: rgba(239, 68, 68, 0.9);
+    border-color: rgba(239, 68, 68, 0.7);
+}
+
+.btn-icon {
+    font-size: 1.1rem;
+}
+
+/* AR Overlay Styles */
+.book-detection-box {
+    position: absolute;
+    border: 2px dashed #4ade80;
+    background: rgba(74, 222, 128, 0.1);
+    pointer-events: none;
+}
+
+.confidence-badge {
+    position: absolute;
+    top: -25px;
+    left: 0;
+    background: rgba(0, 0, 0, 0.8);
+    color: #4ade80;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.ar-suggestion {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 500;
+    max-width: 150px;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ar-suggestion:hover {
+    background: rgba(251, 191, 36, 0.2);
+    border-color: #fbbf24;
+    transform: scale(1.05);
+}
+
+.suggestion-type {
+    color: #fbbf24;
+    font-weight: 600;
+}
+
+.suggestion-efficiency {
+    color: #4ade80;
+    font-size: 0.75rem;
+    margin-top: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .detection-info {
+        right: 10px;
+        min-width: 180px;
+        padding: 15px;
+    }
+    
+    .controls {
+        bottom: 20px;
+        flex-wrap: wrap;
+        max-width: 90vw;
+    }
+    
+    .control-btn {
+        min-width: 100px;
+        padding: 10px 16px;
+        font-size: 0.8rem;
+    }
+}
