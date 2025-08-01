@@ -3,14 +3,11 @@
  * Physics-based calculations for book arrangement optimization
  */
 
+import BookDimensionsDB from './book-dimensions-db.js';
+
 class SpatialOptimizer {
     constructor() {
-        // US Standard Book Dimensions (in pixels)
-        this.BOOK_STANDARDS = {
-            massMarket: { width: 25, height: 40, thickness: 15 },
-            trade: { width: 35, height: 52, thickness: 20 },
-            hardcover: { width: 38, height: 52, thickness: 25 }
-        };
+        this.dimensionsDB = new BookDimensionsDB();
         
         this.SHELF_CONSTRAINTS = {
             maxHeight: 300,

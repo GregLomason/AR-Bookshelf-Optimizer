@@ -3,21 +3,31 @@
  * Enhanced local detection when MCP servers are unavailable
  */
 
+import BookDimensionsDB from './book-dimensions-db.js';
+
 class FallbackDetection {
     constructor() {
+        this.dimensionsDB = new BookDimensionsDB();
+        
+        // Get realistic ranges from dimension database
+        const spineRange = this.dimensionsDB.getSpineWidthRange();
+        const heightRange = this.dimensionsDB.getBookHeightRange();
+        
         this.config = {
-            edgeThreshold: 60,      // Much higher threshold to reduce false positives
-            minBookWidth: 15,       // Larger minimum width
-            maxBookWidth: 45,       // Smaller maximum width
-            minBookHeight: 100,     // Taller minimum height
-            maxBookHeight: 300,
-            sampleStep: 3,          // Larger step to reduce noise
+            edgeThreshold: 60,
+            minBookWidth: spineRange.min,     // Use DB spine width range
+            maxBookWidth: spineRange.max,
+            minBookHeight: heightRange.min,   // Use DB height range
+            maxBookHeight: heightRange.max,
+            sampleStep: 3,
             shelfDetectionEnabled: true,
             verticalEdgeWeight: 0.8,
             colorDifferenceWeight: 0.2,
-            minEdgeSeparation: 12,  // Minimum distance between detected edges
-            confidenceThreshold: 0.4 // Higher confidence requirement
+            minEdgeSeparation: 12,
+            confidenceThreshold: 0.4
         };
+        
+        console.log('📚 Using dimension ranges:', { spine: spineRange, height: heightRange });
     }
 
     detectBooks(imageData) {
@@ -184,8 +194,11 @@ class FallbackDetection {
             if (this.isValidBookWidth(bookWidth)) {
                 const confidence = this.calculateBookConfidenceFromEdges(leftEdge, rightEdge, bookWidth);
                 
-                // Multiple validation layers to prevent false positives
-                if (confidence > this.config.confidenceThreshold &&
+                // Multiple validation layers including dimension database
+                const dimensionConfidence = this.dimensionsDB.getDimensionConfidence(bookWidth, shelfHeight * 0.85, bookWidth);
+                const finalConfidence = confidence * dimensionConfidence;
+                
+                if (finalConfidence > this.config.confidenceThreshold &&
                     this.validateBookRegion(leftEdge.x, shelfTop, bookWidth, shelfHeight, leftEdge, rightEdge)) {
                     
                     const book = {
@@ -194,7 +207,8 @@ class FallbackDetection {
                         y: shelfTop,
                         width: bookWidth,
                         height: shelfHeight * 0.85,
-                        confidence: confidence,
+                        confidence: finalConfidence,
+                        dimensionValidation: this.dimensionsDB.validateBookDimensions(bookWidth, shelfHeight * 0.85, bookWidth),
                         title: `Book ${books.length + 1}`,
                         isReal: true,
                         spineArea: bookWidth * shelfHeight * 0.85,
@@ -433,11 +447,8 @@ class FallbackDetection {
     }
 
     getWidthConfidenceFactor(width) {
-        // Much stricter confidence based on realistic book spine widths
-        if (width >= 18 && width <= 32) return 1.0;  // Optimal book spine width
-        if (width >= 15 && width <= 40) return 0.7;  // Good book spine width
-        if (width >= 12 && width <= 45) return 0.4;  // Marginal book spine width
-        return 0.1; // Very unlikely book spine width
+        // Use dimension database for more accurate confidence
+        return this.dimensionsDB.getDimensionConfidence(width, 200, width); // Assume 200px height for width-only validation
     }
 
     getSymmetryFactor(leftLine, rightLine) {
