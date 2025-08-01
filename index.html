@@ -686,7 +686,7 @@
             
             // Convert regions to book objects with realistic dimensions
             spineRegions.forEach((region, index) => {
-                if (region.width > 8 && region.height > 60) { // More lenient book size requirements
+                if (region.width > 12 && region.height > 80 && region.width < 80 && region.height < 400) { // Realistic book size constraints
                     books.push({
                         id: `real_book_${index}`,
                         x: region.x,
@@ -720,7 +720,7 @@
                         }
                     }
                     
-                    edges[y * width + x] = Math.min(255, Math.abs(gx) / 3); // More sensitive edge detection
+                    edges[y * width + x] = Math.min(255, Math.abs(gx) / 4); // Balanced edge detection sensitivity
                 }
             }
             
@@ -730,7 +730,7 @@
         function findBookSpineRegions(edges, width, height) {
             const regions = [];
             const visited = new Set();
-            const threshold = 18; // Lower threshold for better sensitivity
+            const threshold = 25; // Balanced threshold to reduce false positives
             
             // Find connected regions of vertical edges
             for (let y = 0; y < height; y++) {
@@ -740,15 +740,23 @@
                     if (edges[idx] > threshold && !visited.has(idx)) {
                         const region = floodFillRegion(edges, width, height, x, y, threshold, visited);
                         
-                        if (region.pixels.length > 50) { // Smaller minimum region size
-                            regions.push({
-                                x: region.minX,
-                                y: region.minY,
-                                width: region.maxX - region.minX,
-                                height: region.maxY - region.minY,
-                                confidence: Math.min(0.95, region.pixels.length / 1000),
-                                pixelCount: region.pixels.length
-                            });
+                        if (region.pixels.length > 200) { // Larger minimum region to filter noise
+                            const regionWidth = region.maxX - region.minX;
+                            const regionHeight = region.maxY - region.minY;
+                            const aspectRatio = regionHeight / regionWidth;
+                            
+                            // Additional validation for book-like shapes
+                            if (aspectRatio > 1.5 && aspectRatio < 10 && regionWidth < width * 0.2) {
+                                regions.push({
+                                    x: region.minX,
+                                    y: region.minY,
+                                    width: regionWidth,
+                                    height: regionHeight,
+                                    confidence: Math.min(0.95, region.pixels.length / 1000),
+                                    pixelCount: region.pixels.length,
+                                    aspectRatio: aspectRatio
+                                });
+                            }
                         }
                     }
                 }
@@ -1043,7 +1051,7 @@
                 }
             });
             
-            return stabilized.filter(book => book.confidence > 0.15); // Remove very low confidence detections
+            return stabilized.filter(book => book.confidence > 0.4); // Higher confidence threshold to reduce noise
         }
 
         function drawStableOverlays() {
