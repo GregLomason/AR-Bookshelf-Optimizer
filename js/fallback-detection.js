@@ -57,14 +57,6 @@ class FallbackDetection {
         }
         
         console.log('📚 Fallback detected books:', books.length);
-        
-        // If still no books detected, create some debug test books
-        if (books.length === 0) {
-            console.log('🧪 No books detected, creating test books for debugging...');
-            books.push(this.createTestBook(0, height));
-            books.push(this.createTestBook(1, height));
-        }
-        
         return books;
     }
 

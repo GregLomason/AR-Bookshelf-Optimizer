@@ -1,35 +1,32 @@
 /**
  * MCP Server Integration Module
- * Handles communication with YOLO and OpenCV MCP servers
+ * Handles communication with ImageSorcery MCP server for computer vision
  */
 
 class MCPBookDetection {
     constructor() {
+        // ImageSorcery MCP endpoints
         this.mcpEndpoints = {
-            yolo: '/mcp/yolo/detect',
-            opencv: '/mcp/opencv/refine-boundaries'
+            objectDetection: '/mcp/imagesorcery/detect-objects',
+            imageProcessing: '/mcp/imagesorcery/process-image'
         };
     }
 
     async detectBooks(imageData) {
-        console.log('🔍 Starting MCP-powered book detection...');
+        console.log('🔍 Starting ImageSorcery MCP book detection...');
         
         try {
             // Convert imageData to base64 for MCP server
             const imageBase64 = this.imageDataToBase64(imageData);
             
-            // Use YOLO MCP for book object detection
-            const yoloResults = await this.callYOLOMCP(imageBase64);
-            console.log('🎯 YOLO detected objects:', yoloResults.length);
+            // Use ImageSorcery for object detection
+            const detectionResults = await this.callImageSorceryDetection(imageBase64);
+            console.log('🎯 ImageSorcery detected objects:', detectionResults.length);
             
-            // Use OpenCV MCP for precise boundary refinement
-            const openCVResults = await this.callOpenCVMCP(imageBase64, yoloResults);
-            console.log('🔧 OpenCV refined boundaries:', openCVResults.length);
-            
-            return this.processDetections(openCVResults);
+            return this.processDetections(detectionResults);
             
         } catch (error) {
-            console.error('❌ MCP detection failed:', error);
+            console.error('❌ ImageSorcery MCP detection failed:', error);
             throw error;
         }
     }
@@ -43,89 +40,60 @@ class MCPBookDetection {
         return canvas.toDataURL('image/jpeg', 0.8);
     }
 
-    async callYOLOMCP(imageBase64) {
+    async callImageSorceryDetection(imageBase64) {
         try {
-            const response = await fetch(this.mcpEndpoints.yolo, {
+            const response = await fetch(this.mcpEndpoints.objectDetection, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
                     image: imageBase64,
-                    classes: ['book'],
-                    confidence_threshold: 0.3,
-                    nms_threshold: 0.4
+                    task: 'object_detection',
+                    objects: ['book', 'books', 'spine', 'spines'],
+                    confidence_threshold: 0.25
                 }),
-                signal: AbortSignal.timeout(5000) // 5 second timeout
+                signal: AbortSignal.timeout(10000) // 10 second timeout for AI processing
             });
             
             if (!response.ok) {
-                throw new Error(`YOLO MCP failed: ${response.status} - ${response.statusText}`);
+                throw new Error(`ImageSorcery MCP failed: ${response.status} - ${response.statusText}`);
             }
             
             const results = await response.json();
-            return results.detections || [];
+            return results.detections || results.objects || [];
         } catch (error) {
             if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                throw new Error('MCP YOLO server not available - check if server is running');
+                throw new Error('ImageSorcery MCP server not available - check if server is running');
             }
             throw error;
         }
     }
 
-    async callOpenCVMCP(imageBase64, yoloDetections) {
-        try {
-            const response = await fetch(this.mcpEndpoints.opencv, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    image: imageBase64,
-                    detections: yoloDetections,
-                    operations: [
-                        'edge_detection',
-                        'contour_analysis', 
-                        'boundary_refinement'
-                    ]
-                }),
-                signal: AbortSignal.timeout(5000) // 5 second timeout
-            });
-            
-            if (!response.ok) {
-                throw new Error(`OpenCV MCP failed: ${response.status} - ${response.statusText}`);
-            }
-            
-            const results = await response.json();
-            return results.refined_detections || yoloDetections;
-        } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                throw new Error('MCP OpenCV server not available - check if server is running');
-            }
-            throw error;
-        }
-    }
 
     processDetections(detections) {
         const books = [];
         
         detections.forEach((detection, index) => {
             if (this.isValidBookDetection(detection)) {
+                // Handle different possible coordinate formats from ImageSorcery
+                const bbox = this.normalizeDetectionCoordinates(detection);
+                
                 books.push({
-                    id: `mcp_book_${index}`,
-                    x: detection.x,
-                    y: detection.y,
-                    width: detection.width,
-                    height: detection.height,
-                    confidence: detection.confidence,
+                    id: `imagesorcery_book_${index}`,
+                    x: bbox.x,
+                    y: bbox.y,
+                    width: bbox.width,
+                    height: bbox.height,
+                    confidence: detection.confidence || detection.score || 0.7,
                     title: `Book ${books.length + 1}`,
                     isReal: true,
-                    spineArea: detection.width * detection.height,
-                    estimatedThickness: detection.width * 0.6,
-                    canRotate: detection.height < detection.width * 3,
-                    canStack: detection.height > 100 && detection.width < 30,
-                    volumeEfficiency: this.calculateVolumeEfficiency(detection.width, detection.height),
-                    detectionMethod: 'MCP_YOLO_OpenCV',
+                    spineArea: bbox.width * bbox.height,
+                    estimatedThickness: bbox.width * 0.6,
+                    canRotate: bbox.height < bbox.width * 3,
+                    canStack: bbox.height > 100 && bbox.width < 30,
+                    volumeEfficiency: this.calculateVolumeEfficiency(bbox.width, bbox.height),
+                    detectionMethod: 'ImageSorcery_MCP',
                     rawDetection: detection
                 });
             }
@@ -134,15 +102,59 @@ class MCPBookDetection {
         return books;
     }
 
+    normalizeDetectionCoordinates(detection) {
+        // Handle various coordinate formats from ImageSorcery
+        if (detection.bbox) {
+            // Format: {bbox: [x, y, width, height]}
+            return {
+                x: detection.bbox[0],
+                y: detection.bbox[1],
+                width: detection.bbox[2],
+                height: detection.bbox[3]
+            };
+        } else if (detection.x !== undefined) {
+            // Format: {x, y, width, height}
+            return {
+                x: detection.x,
+                y: detection.y,
+                width: detection.width,
+                height: detection.height
+            };
+        } else if (detection.bounds) {
+            // Format: {bounds: {left, top, right, bottom}}
+            return {
+                x: detection.bounds.left,
+                y: detection.bounds.top,
+                width: detection.bounds.right - detection.bounds.left,
+                height: detection.bounds.bottom - detection.bounds.top
+            };
+        }
+        
+        // Fallback format
+        return {
+            x: detection.left || 0,
+            y: detection.top || 0,
+            width: detection.right - detection.left || 50,
+            height: detection.bottom - detection.top || 100
+        };
+    }
+
     isValidBookDetection(detection) {
-        const { width, height, confidence } = detection;
+        const bbox = this.normalizeDetectionCoordinates(detection);
+        const confidence = detection.confidence || detection.score || 0.7;
         
-        const aspectRatio = height / width;
-        const isBookSized = width > 10 && width < 100 && height > 60 && height < 400;
+        const aspectRatio = bbox.height / bbox.width;
+        const isBookSized = bbox.width > 10 && bbox.width < 100 && bbox.height > 60 && bbox.height < 400;
         const isBookRatio = aspectRatio > 1.2 && aspectRatio < 8;
-        const isConfident = confidence > 0.3;
+        const isConfident = confidence > 0.2;
         
-        return isBookSized && isBookRatio && isConfident;
+        // Also check if it's labeled as a book/spine
+        const isBookLabeled = detection.label && (
+            detection.label.toLowerCase().includes('book') ||
+            detection.label.toLowerCase().includes('spine')
+        );
+        
+        return (isBookSized && isBookRatio && isConfident) || isBookLabeled;
     }
 
     calculateVolumeEfficiency(width, height) {
