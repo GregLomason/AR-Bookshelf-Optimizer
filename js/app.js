@@ -48,8 +48,11 @@ class ARBookshelfOptimizer {
         switchBtn.addEventListener('click', () => this.switchCamera());
         infoBtn.addEventListener('click', () => this.showInfo());
 
-        // Handle window resize
-        window.addEventListener('resize', () => this.resizeCanvas());
+        // Handle window resize and orientation changes
+        window.addEventListener('resize', () => this.handleOrientationChange());
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => this.handleOrientationChange(), 100);
+        });
     }
 
     async initCamera() {
@@ -67,8 +70,12 @@ class ARBookshelfOptimizer {
             
             return new Promise((resolve) => {
                 this.video.onloadedmetadata = () => {
-                    this.resizeCanvas();
-                    resolve();
+                    // Wait a bit for video to fully load then resize
+                    setTimeout(() => {
+                        this.resizeCanvas();
+                        this.updateUILayout();
+                        resolve();
+                    }, 100);
                 };
             });
         } catch (error) {
@@ -77,27 +84,80 @@ class ARBookshelfOptimizer {
         }
     }
 
+    handleOrientationChange() {
+        console.log('🔄 Handling orientation change...');
+        setTimeout(() => {
+            this.resizeCanvas();
+            this.updateUILayout();
+        }, 200); // Allow time for orientation to settle
+    }
+    
     resizeCanvas() {
-        if (this.video.videoWidth && this.video.videoHeight) {
-            // Match video dimensions exactly for accurate overlay
-            this.canvas.width = this.video.videoWidth;
-            this.canvas.height = this.video.videoHeight;
-            console.log('📐 Canvas resized to match video:', this.canvas.width + 'x' + this.canvas.height);
+        if (!this.video || !this.canvas) return;
+        
+        const videoRect = this.video.getBoundingClientRect();
+        const containerRect = this.video.parentElement.getBoundingClientRect();
+        
+        // Set canvas size to match actual displayed video size
+        this.canvas.width = videoRect.width;
+        this.canvas.height = videoRect.height;
+        
+        // Position canvas to perfectly overlay the video
+        this.canvas.style.position = 'absolute';
+        this.canvas.style.left = videoRect.left - containerRect.left + 'px';
+        this.canvas.style.top = videoRect.top - containerRect.top + 'px';
+        this.canvas.style.width = videoRect.width + 'px';
+        this.canvas.style.height = videoRect.height + 'px';
+        this.canvas.style.pointerEvents = 'none';
+        this.canvas.style.zIndex = '10';
+        
+        console.log('📐 Canvas sized:', {
+            canvas: { w: this.canvas.width, h: this.canvas.height },
+            video: { w: videoRect.width, h: videoRect.height },
+            position: { x: videoRect.left - containerRect.left, y: videoRect.top - containerRect.top }
+        });
+    }
+    
+    updateUILayout() {
+        const isLandscape = window.innerWidth > window.innerHeight;
+        const controls = document.querySelector('.controls');
+        const detectionInfo = document.querySelector('.detection-info');
+        
+        if (isLandscape) {
+            // Landscape mode: move controls to side
+            if (controls) {
+                controls.style.bottom = '20px';
+                controls.style.right = '20px';
+                controls.style.left = 'auto';
+                controls.style.transform = 'none';
+                controls.style.flexDirection = 'column';
+                controls.style.gap = '10px';
+            }
+            
+            if (detectionInfo) {
+                detectionInfo.style.top = '20px';
+                detectionInfo.style.right = '20px';
+                detectionInfo.style.transform = 'none';
+            }
         } else {
-            // Fallback dimensions
-            this.canvas.width = window.innerWidth;
-            this.canvas.height = window.innerHeight;
-            console.log('📐 Canvas fallback size:', this.canvas.width + 'x' + this.canvas.height);
+            // Portrait mode: restore default positions
+            if (controls) {
+                controls.style.bottom = '20px';
+                controls.style.left = '50%';
+                controls.style.right = 'auto';
+                controls.style.transform = 'translateX(-50%)';
+                controls.style.flexDirection = 'row';
+                controls.style.gap = '15px';
+            }
+            
+            if (detectionInfo) {
+                detectionInfo.style.top = '50%';
+                detectionInfo.style.right = '20px';
+                detectionInfo.style.transform = 'translateY(-50%)';
+            }
         }
         
-        // Set canvas style to perfectly overlay video
-        this.canvas.style.width = '100vw';
-        this.canvas.style.height = '100vh';
-        this.canvas.style.position = 'absolute';
-        this.canvas.style.top = '0';
-        this.canvas.style.left = '0';
-        this.canvas.style.pointerEvents = 'none';
-        this.canvas.style.objectFit = 'cover'; // Match video scaling
+        console.log('📱 UI layout updated for:', isLandscape ? 'landscape' : 'portrait');
     }
 
     startDetection() {
@@ -177,19 +237,28 @@ class ARBookshelfOptimizer {
         tempCtx.drawImage(this.video, 0, 0);
         
         // Get image data
-        return tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        
+        console.log(`📷 Frame captured: ${imageData.width}x${imageData.height}`);
+        return imageData;
     }
 
     renderAR(books, suggestions) {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Scale factors for canvas vs video (with better accuracy)
-        const scaleX = this.canvas.width / this.video.videoWidth || 1;
-        const scaleY = this.canvas.height / this.video.videoHeight || 1;
+        // Calculate proper scaling based on actual video display vs internal resolution
+        const videoRect = this.video.getBoundingClientRect();
+        const scaleX = videoRect.width / this.video.videoWidth || 1;
+        const scaleY = videoRect.height / this.video.videoHeight || 1;
         
-        console.log(`🎯 AR rendering: ${books.length} books, scale: ${scaleX.toFixed(2)}x${scaleY.toFixed(2)}`);
+        console.log(`🎯 AR rendering: ${books.length} books, scale: ${scaleX.toFixed(2)}x${scaleY.toFixed(2)}, canvas: ${this.canvas.width}x${this.canvas.height}`);
 
+        // Debug: log first few book positions for alignment check
+        if (books.length > 0) {
+            console.log(`📖 First book pos: x=${books[0].x}, y=${books[0].y}, w=${books[0].width}, scaled: x=${books[0].x * scaleX}, y=${books[0].y * scaleY}`);
+        }
+        
         // Render book detection boxes
         books.forEach(book => {
             this.drawBookDetection(book, scaleX, scaleY);

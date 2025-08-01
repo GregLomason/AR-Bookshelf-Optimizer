@@ -130,13 +130,14 @@ body {
 }
 
 .controls {
-    position: absolute;
+    position: fixed; /* Changed from absolute to fixed for better mobile support */
     bottom: 40px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     gap: 15px;
     pointer-events: auto;
+    z-index: 30; /* Higher z-index to ensure visibility */
 }
 
 .control-btn {
@@ -251,5 +252,71 @@ body {
         min-width: 100px;
         padding: 10px 16px;
         font-size: 0.8rem;
+    }
+}
+
+/* Landscape Orientation */
+@media (orientation: landscape) {
+    .top-bar {
+        padding: 20px 20px 15px 20px;
+    }
+    
+    .app-title {
+        font-size: 1rem;
+    }
+    
+    .detection-info {
+        top: 20px;
+        right: 20px;
+        transform: none;
+        min-width: 160px;
+        padding: 15px;
+    }
+    
+    .controls {
+        bottom: 20px;
+        right: 20px;
+        left: auto;
+        transform: none;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 140px;
+    }
+    
+    .control-btn {
+        min-width: 120px;
+        padding: 8px 12px;
+        font-size: 0.8rem;
+    }
+}
+
+/* Portrait Orientation - ensure buttons are visible */
+@media (orientation: portrait) {
+    .controls {
+        bottom: 30px; /* More space from bottom */
+        left: 50%;
+        transform: translateX(-50%);
+        flex-direction: row;
+        gap: 15px;
+        max-width: 90vw;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .detection-info {
+        top: 50%;
+        right: 15px;
+        transform: translateY(-50%);
+    }
+}
+
+/* Safe area adjustments for mobile devices */
+@supports (padding: max(0px)) {
+    .controls {
+        padding-bottom: max(20px, env(safe-area-inset-bottom));
+    }
+    
+    .top-bar {
+        padding-top: max(50px, env(safe-area-inset-top) + 20px);
     }
 }
