@@ -79,9 +79,10 @@ class ARBookshelfOptimizer {
 
     resizeCanvas() {
         if (this.video.videoWidth && this.video.videoHeight) {
+            // Match video dimensions exactly for accurate overlay
             this.canvas.width = this.video.videoWidth;
             this.canvas.height = this.video.videoHeight;
-            console.log('📐 Canvas resized to:', this.canvas.width + 'x' + this.canvas.height);
+            console.log('📐 Canvas resized to match video:', this.canvas.width + 'x' + this.canvas.height);
         } else {
             // Fallback dimensions
             this.canvas.width = window.innerWidth;
@@ -89,13 +90,14 @@ class ARBookshelfOptimizer {
             console.log('📐 Canvas fallback size:', this.canvas.width + 'x' + this.canvas.height);
         }
         
-        // Set canvas style to match video
-        this.canvas.style.width = '100%';
-        this.canvas.style.height = '100%';
+        // Set canvas style to perfectly overlay video
+        this.canvas.style.width = '100vw';
+        this.canvas.style.height = '100vh';
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '0';
         this.canvas.style.left = '0';
         this.canvas.style.pointerEvents = 'none';
+        this.canvas.style.objectFit = 'cover'; // Match video scaling
     }
 
     startDetection() {
@@ -182,9 +184,11 @@ class ARBookshelfOptimizer {
         // Clear canvas
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Scale factors for canvas vs video
-        const scaleX = this.canvas.width / this.video.videoWidth;
-        const scaleY = this.canvas.height / this.video.videoHeight;
+        // Scale factors for canvas vs video (with better accuracy)
+        const scaleX = this.canvas.width / this.video.videoWidth || 1;
+        const scaleY = this.canvas.height / this.video.videoHeight || 1;
+        
+        console.log(`🎯 AR rendering: ${books.length} books, scale: ${scaleX.toFixed(2)}x${scaleY.toFixed(2)}`);
 
         // Render book detection boxes
         books.forEach(book => {
@@ -203,22 +207,46 @@ class ARBookshelfOptimizer {
         const width = book.width * scaleX;
         const height = book.height * scaleY;
 
-        // Detection box
-        this.ctx.strokeStyle = book.stable ? '#4ade80' : '#fbbf24';
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([5, 5]);
-        this.ctx.strokeRect(x, y, width, height);
-
-        // Confidence badge
-        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        this.ctx.fillRect(x, y - 20, 60, 18);
+        // Spine-focused detection box (tighter fit)
+        const spineMargin = 2;
+        const adjustedX = x + spineMargin;
+        const adjustedWidth = Math.max(width - spineMargin * 2, 4);
         
-        this.ctx.fillStyle = book.stable ? '#4ade80' : '#fbbf24';
-        this.ctx.font = '12px Arial';
-        this.ctx.fillText(`${Math.round(book.confidence * 100)}%`, x + 5, y - 8);
-
-        // Reset line dash
+        // Main spine outline
+        this.ctx.strokeStyle = book.stable ? '#4ade80' : '#fbbf24';
+        this.ctx.lineWidth = book.stable ? 2 : 1.5;
         this.ctx.setLineDash([]);
+        this.ctx.strokeRect(adjustedX, y, adjustedWidth, height);
+        
+        // Book spine left and right edges (more precise)
+        this.ctx.strokeStyle = book.confidence > 0.6 ? '#22c55e' : '#84cc16';
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.moveTo(adjustedX, y);
+        this.ctx.lineTo(adjustedX, y + height);
+        this.ctx.moveTo(adjustedX + adjustedWidth, y);
+        this.ctx.lineTo(adjustedX + adjustedWidth, y + height);
+        this.ctx.stroke();
+        
+        // Confidence indicator (smaller, less intrusive)
+        if (book.confidence > 0.3) {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            const badgeWidth = Math.min(adjustedWidth, 45);
+            this.ctx.fillRect(adjustedX, y - 16, badgeWidth, 14);
+            
+            this.ctx.fillStyle = book.stable ? '#4ade80' : '#fbbf24';
+            this.ctx.font = '10px monospace';
+            const confText = `${Math.round(book.confidence * 100)}%`;
+            this.ctx.fillText(confText, adjustedX + 2, y - 6);
+        }
+        
+        // Book index number (for debugging)
+        if (book.id && book.confidence > 0.4) {
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            this.ctx.font = '8px Arial';
+            const bookNum = book.id.split('_').pop() || '?';
+            this.ctx.fillText(bookNum, adjustedX + adjustedWidth - 10, y + 12);
+        }
     }
 
     drawARSuggestion(suggestion, scaleX, scaleY) {
