@@ -671,39 +671,45 @@
             const width = imageData.width;
             const height = imageData.height;
             
-            console.log('🔍 Starting book detection...', { width, height });
+            console.log('🔍 Starting real book detection...', { width, height });
             
-            // Fallback: Create some test books for now to restore functionality
-            // This ensures the app works while we debug the detection
-            const numBooks = Math.floor(Math.random() * 15) + 20; // 20-35 books
-            const shelfHeight = height / 2;
+            // Simple approach: detect vertical color changes that indicate book spines
+            const verticalLines = findVerticalColorChanges(data, width, height);
+            console.log('📏 Found vertical lines:', verticalLines.length);
             
-            for (let i = 0; i < numBooks; i++) {
-                const shelfIndex = i < numBooks / 2 ? 0 : 1;
-                const bookWidth = 20 + Math.random() * 25; // 20-45px wide
-                const bookHeight = shelfHeight * 0.8; // Most of shelf height
-                const x = (width / (numBooks / 2)) * (i % (numBooks / 2)) + Math.random() * 10;
-                const y = shelfIndex * shelfHeight + shelfHeight * 0.1;
+            // Create books between pairs of vertical lines
+            for (let i = 0; i < verticalLines.length - 1; i++) {
+                const leftX = verticalLines[i].x;
+                const rightX = verticalLines[i + 1].x;
+                const bookWidth = rightX - leftX;
                 
-                books.push({
-                    id: `book_${i}`,
-                    x: x,
-                    y: y,
-                    width: bookWidth,
-                    height: bookHeight,
-                    confidence: 0.6 + Math.random() * 0.3,
-                    title: `Book ${i + 1}`,
-                    isReal: true,
-                    spineArea: bookWidth * bookHeight,
-                    // Physics properties for spatial optimization
-                    estimatedThickness: bookWidth * 0.6,
-                    canRotate: bookHeight < bookWidth * 3,
-                    canStack: bookHeight > 100 && bookWidth < 30,
-                    volumeEfficiency: 0.4 + Math.random() * 0.4
-                });
+                // Only create book if width is reasonable
+                if (bookWidth > 15 && bookWidth < 80) {
+                    // Determine shelf by Y position
+                    const avgY = (verticalLines[i].y + verticalLines[i + 1].y) / 2;
+                    const shelfHeight = height / 2;
+                    const shelfIndex = avgY < height / 2 ? 0 : 1;
+                    
+                    books.push({
+                        id: `book_${i}`,
+                        x: leftX,
+                        y: shelfIndex * shelfHeight,
+                        width: bookWidth,
+                        height: shelfHeight * 0.8,
+                        confidence: Math.min(0.9, (verticalLines[i].strength + verticalLines[i + 1].strength) / 200),
+                        title: `Book ${books.length + 1}`,
+                        isReal: true,
+                        spineArea: bookWidth * shelfHeight * 0.8,
+                        // Physics properties
+                        estimatedThickness: bookWidth * 0.6,
+                        canRotate: shelfHeight * 0.8 < bookWidth * 3,
+                        canStack: shelfHeight * 0.8 > 100 && bookWidth < 30,
+                        volumeEfficiency: calculateSimpleVolumeEfficiency(bookWidth, shelfHeight * 0.8)
+                    });
+                }
             }
             
-            console.log('📚 Generated books:', books.length);
+            console.log('📚 Detected real books:', books.length);
             return books;
         }
 
@@ -770,12 +776,61 @@
             return null;
         }
 
-        function calculateVolumeEfficiency(region) {
-            // Simple physics: how efficiently is this book using shelf space?
-            const aspectRatio = region.height / region.width;
+        function findVerticalColorChanges(data, width, height) {
+            const lines = [];
+            const step = 4; // Sample every 4th pixel for performance
+            
+            // Look for vertical color changes (book spine boundaries)
+            for (let x = step; x < width - step; x += step) {
+                let totalChange = 0;
+                let avgY = 0;
+                let samples = 0;
+                
+                // Sample down the column
+                for (let y = height * 0.2; y < height * 0.8; y += step * 2) {
+                    const idx = (y * width + x) * 4;
+                    const leftIdx = (y * width + (x - step)) * 4;
+                    const rightIdx = (y * width + (x + step)) * 4;
+                    
+                    if (leftIdx >= 0 && rightIdx < data.length) {
+                        // Calculate color difference between left and right
+                        const leftColor = data[leftIdx] + data[leftIdx + 1] + data[leftIdx + 2];
+                        const rightColor = data[rightIdx] + data[rightIdx + 1] + data[rightIdx + 2];
+                        const colorChange = Math.abs(leftColor - rightColor);
+                        
+                        totalChange += colorChange;
+                        avgY += y;
+                        samples++;
+                    }
+                }
+                
+                // If there's significant color change, it's likely a book boundary
+                if (samples > 0) {
+                    const avgChange = totalChange / samples;
+                    if (avgChange > 60) { // Threshold for book boundary
+                        lines.push({
+                            x: x,
+                            y: avgY / samples,
+                            strength: avgChange
+                        });
+                    }
+                }
+            }
+            
+            // Sort by x position and remove duplicates
+            return lines.sort((a, b) => a.x - b.x)
+                       .filter((line, i, arr) => i === 0 || line.x - arr[i-1].x > 10);
+        }
+
+        function calculateSimpleVolumeEfficiency(width, height) {
+            const aspectRatio = height / width;
             const idealRatio = 2.5; // Typical book ratio
-            const ratioEfficiency = 1 - Math.abs(aspectRatio - idealRatio) / idealRatio;
-            return Math.max(0.1, ratioEfficiency);
+            const efficiency = 1 - Math.abs(aspectRatio - idealRatio) / idealRatio;
+            return Math.max(0.1, Math.min(0.9, efficiency));
+        }
+
+        function calculateVolumeEfficiency(region) {
+            return calculateSimpleVolumeEfficiency(region.width, region.height);
         }
 
         function detectVerticalEdges(grayscale, width, height) {
