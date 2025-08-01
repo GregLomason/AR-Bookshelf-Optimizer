@@ -44,50 +44,66 @@ class MCPBookDetection {
     }
 
     async callYOLOMCP(imageBase64) {
-        const response = await fetch(this.mcpEndpoints.yolo, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                image: imageBase64,
-                classes: ['book'],
-                confidence_threshold: 0.3,
-                nms_threshold: 0.4
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`YOLO MCP failed: ${response.status}`);
+        try {
+            const response = await fetch(this.mcpEndpoints.yolo, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    image: imageBase64,
+                    classes: ['book'],
+                    confidence_threshold: 0.3,
+                    nms_threshold: 0.4
+                }),
+                signal: AbortSignal.timeout(5000) // 5 second timeout
+            });
+            
+            if (!response.ok) {
+                throw new Error(`YOLO MCP failed: ${response.status} - ${response.statusText}`);
+            }
+            
+            const results = await response.json();
+            return results.detections || [];
+        } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                throw new Error('MCP YOLO server not available - check if server is running');
+            }
+            throw error;
         }
-        
-        const results = await response.json();
-        return results.detections || [];
     }
 
     async callOpenCVMCP(imageBase64, yoloDetections) {
-        const response = await fetch(this.mcpEndpoints.opencv, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                image: imageBase64,
-                detections: yoloDetections,
-                operations: [
-                    'edge_detection',
-                    'contour_analysis', 
-                    'boundary_refinement'
-                ]
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`OpenCV MCP failed: ${response.status}`);
+        try {
+            const response = await fetch(this.mcpEndpoints.opencv, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    image: imageBase64,
+                    detections: yoloDetections,
+                    operations: [
+                        'edge_detection',
+                        'contour_analysis', 
+                        'boundary_refinement'
+                    ]
+                }),
+                signal: AbortSignal.timeout(5000) // 5 second timeout
+            });
+            
+            if (!response.ok) {
+                throw new Error(`OpenCV MCP failed: ${response.status} - ${response.statusText}`);
+            }
+            
+            const results = await response.json();
+            return results.refined_detections || yoloDetections;
+        } catch (error) {
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                throw new Error('MCP OpenCV server not available - check if server is running');
+            }
+            throw error;
         }
-        
-        const results = await response.json();
-        return results.refined_detections || yoloDetections;
     }
 
     processDetections(detections) {

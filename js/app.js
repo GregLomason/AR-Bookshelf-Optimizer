@@ -78,8 +78,24 @@ class ARBookshelfOptimizer {
     }
 
     resizeCanvas() {
-        this.canvas.width = this.video.videoWidth || window.innerWidth;
-        this.canvas.height = this.video.videoHeight || window.innerHeight;
+        if (this.video.videoWidth && this.video.videoHeight) {
+            this.canvas.width = this.video.videoWidth;
+            this.canvas.height = this.video.videoHeight;
+            console.log('📐 Canvas resized to:', this.canvas.width + 'x' + this.canvas.height);
+        } else {
+            // Fallback dimensions
+            this.canvas.width = window.innerWidth;
+            this.canvas.height = window.innerHeight;
+            console.log('📐 Canvas fallback size:', this.canvas.width + 'x' + this.canvas.height);
+        }
+        
+        // Set canvas style to match video
+        this.canvas.style.width = '100%';
+        this.canvas.style.height = '100%';
+        this.canvas.style.position = 'absolute';
+        this.canvas.style.top = '0';
+        this.canvas.style.left = '0';
+        this.canvas.style.pointerEvents = 'none';
     }
 
     startDetection() {
@@ -120,14 +136,20 @@ class ARBookshelfOptimizer {
     }
 
     async performDetection() {
-        if (!this.video.videoWidth || !this.video.videoHeight) return;
+        if (!this.video.videoWidth || !this.video.videoHeight) {
+            console.log('⏳ Video not ready yet, skipping detection...');
+            return;
+        }
 
         try {
+            console.log('🎥 Capturing frame for detection...');
             // Capture current frame
             const imageData = this.captureFrame();
+            console.log('📷 Frame captured:', imageData.width + 'x' + imageData.height);
             
             // Perform detection
             const results = await this.detectionController.detectBooks(imageData);
+            console.log('🔍 Detection completed:', results.books.length, 'books found');
             
             // Update UI
             this.updateStats(results.stats);
@@ -138,6 +160,7 @@ class ARBookshelfOptimizer {
             
         } catch (error) {
             console.error('❌ Detection error:', error);
+            this.updateStatus('Detection Error', 'error');
         }
     }
 
