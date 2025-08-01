@@ -6,15 +6,17 @@
 class FallbackDetection {
     constructor() {
         this.config = {
-            edgeThreshold: 25,
-            minBookWidth: 8,
-            maxBookWidth: 60,
-            minBookHeight: 80,
-            maxBookHeight: 350,
-            sampleStep: 2,
+            edgeThreshold: 60,      // Much higher threshold to reduce false positives
+            minBookWidth: 15,       // Larger minimum width
+            maxBookWidth: 45,       // Smaller maximum width
+            minBookHeight: 100,     // Taller minimum height
+            maxBookHeight: 300,
+            sampleStep: 3,          // Larger step to reduce noise
             shelfDetectionEnabled: true,
-            verticalEdgeWeight: 0.7,
-            colorDifferenceWeight: 0.3
+            verticalEdgeWeight: 0.8,
+            colorDifferenceWeight: 0.2,
+            minEdgeSeparation: 12,  // Minimum distance between detected edges
+            confidenceThreshold: 0.4 // Higher confidence requirement
         };
     }
 
@@ -157,11 +159,13 @@ class FallbackDetection {
             
             if (samples > 0) {
                 const avgStrength = totalEdgeStrength / samples;
-                if (avgStrength > this.config.edgeThreshold) {
+                // Much stricter threshold to prevent over-detection
+                if (avgStrength > this.config.edgeThreshold && samples > 3) {
                     verticalEdges.push({
                         x: x,
                         strength: avgStrength,
-                        shelfIndex: shelfIndex
+                        shelfIndex: shelfIndex,
+                        samples: samples
                     });
                 }
             }
@@ -171,36 +175,51 @@ class FallbackDetection {
         const filteredEdges = this.filterVerticalEdges(verticalEdges);
         console.log(`📏 Shelf ${shelfIndex + 1} found ${filteredEdges.length} vertical edges`);
         
-        // Create books from pairs of edges
+        // Create books from pairs of edges with extensive validation
         for (let i = 0; i < filteredEdges.length - 1; i++) {
             const leftEdge = filteredEdges[i];
             const rightEdge = filteredEdges[i + 1];
             const bookWidth = rightEdge.x - leftEdge.x;
             
             if (this.isValidBookWidth(bookWidth)) {
-                const book = {
-                    id: `fallback_s${shelfIndex}_b${books.length}`,
-                    x: leftEdge.x,
-                    y: shelfTop,
-                    width: bookWidth,
-                    height: shelfHeight * 0.85,
-                    confidence: this.calculateBookConfidenceFromEdges(leftEdge, rightEdge, bookWidth),
-                    title: `Book ${books.length + 1}`,
-                    isReal: true,
-                    spineArea: bookWidth * shelfHeight * 0.85,
-                    estimatedThickness: bookWidth * 0.6,
-                    canRotate: shelfHeight < bookWidth * 3,
-                    canStack: shelfHeight > 100 && bookWidth < 30,
-                    volumeEfficiency: this.calculateVolumeEfficiency(bookWidth, shelfHeight * 0.85),
-                    detectionMethod: 'Fallback_Enhanced_v2',
-                    shelfIndex: shelfIndex,
-                    rawData: { leftEdge, rightEdge }
-                };
+                const confidence = this.calculateBookConfidenceFromEdges(leftEdge, rightEdge, bookWidth);
                 
-                if (book.confidence > 0.15) {
+                // Multiple validation layers to prevent false positives
+                if (confidence > this.config.confidenceThreshold &&
+                    this.validateBookRegion(leftEdge.x, shelfTop, bookWidth, shelfHeight, leftEdge, rightEdge)) {
+                    
+                    const book = {
+                        id: `fallback_s${shelfIndex}_b${books.length}`,
+                        x: leftEdge.x,
+                        y: shelfTop,
+                        width: bookWidth,
+                        height: shelfHeight * 0.85,
+                        confidence: confidence,
+                        title: `Book ${books.length + 1}`,
+                        isReal: true,
+                        spineArea: bookWidth * shelfHeight * 0.85,
+                        estimatedThickness: bookWidth * 0.6,
+                        canRotate: shelfHeight < bookWidth * 3,
+                        canStack: shelfHeight > 100 && bookWidth < 30,
+                        volumeEfficiency: this.calculateVolumeEfficiency(bookWidth, shelfHeight * 0.85),
+                        detectionMethod: 'Fallback_Enhanced_v3',
+                        shelfIndex: shelfIndex,
+                        rawData: { leftEdge, rightEdge }
+                    };
+                    
                     books.push(book);
                 }
             }
+        }
+        
+        // Final validation: limit books per shelf to realistic numbers
+        const maxBooksPerShelf = 20; // Maximum realistic books per shelf
+        if (books.length > maxBooksPerShelf) {
+            // Keep only the highest confidence books
+            return books
+                .sort((a, b) => b.confidence - a.confidence)
+                .slice(0, maxBooksPerShelf)
+                .sort((a, b) => a.x - b.x); // Re-sort by position
         }
         
         return books;
@@ -245,26 +264,37 @@ class FallbackDetection {
     }
     
     filterVerticalEdges(edges) {
-        // Sort by x position
-        const sorted = edges.sort((a, b) => a.x - b.x);
+        // Sort by strength first, then by x position
+        const sortedByStrength = edges.sort((a, b) => b.strength - a.strength);
         
-        // Remove edges too close together
+        // Take only the strongest edges to prevent over-detection
+        const maxEdgesPerShelf = 40; // Limit to reasonable number
+        const strongestEdges = sortedByStrength.slice(0, maxEdgesPerShelf);
+        
+        // Sort by x position for processing
+        const sorted = strongestEdges.sort((a, b) => a.x - b.x);
+        
+        // Remove edges too close together with stricter separation
         const filtered = [];
         let lastX = -100;
         
         for (const edge of sorted) {
-            if (edge.x - lastX > 6) { // Minimum 6px separation
-                filtered.push(edge);
-                lastX = edge.x;
+            if (edge.x - lastX > this.config.minEdgeSeparation) {
+                // Additional validation: require minimum strength
+                if (edge.strength > this.config.edgeThreshold * 1.2) {
+                    filtered.push(edge);
+                    lastX = edge.x;
+                }
             } else {
-                // Keep the stronger edge
-                if (filtered.length > 0 && edge.strength > filtered[filtered.length - 1].strength) {
+                // Keep the stronger edge only if significantly stronger
+                if (filtered.length > 0 && edge.strength > filtered[filtered.length - 1].strength * 1.3) {
                     filtered[filtered.length - 1] = edge;
                     lastX = edge.x;
                 }
             }
         }
         
+        console.log(`🔍 Filtered edges: ${edges.length} → ${filtered.length}`);
         return filtered;
     }
 
@@ -371,20 +401,43 @@ class FallbackDetection {
         };
     }
 
+    validateBookRegion(x, y, width, height, leftEdge, rightEdge) {
+        // Additional validation to prevent false book detections
+        
+        // 1. Check edge strength consistency
+        const strengthRatio = Math.min(leftEdge.strength, rightEdge.strength) / Math.max(leftEdge.strength, rightEdge.strength);
+        if (strengthRatio < 0.3) return false; // Edges too dissimilar
+        
+        // 2. Check if width is in realistic book range
+        if (width < 15 || width > 40) return false;
+        
+        // 3. Check sample consistency (both edges should have good coverage)
+        if (leftEdge.samples < 3 || rightEdge.samples < 3) return false;
+        
+        // 4. Minimum strength requirement
+        if (leftEdge.strength < this.config.edgeThreshold * 0.8 || 
+            rightEdge.strength < this.config.edgeThreshold * 0.8) return false;
+        
+        return true;
+    }
+    
     calculateBookConfidenceFromEdges(leftEdge, rightEdge, bookWidth) {
-        const strengthFactor = Math.min(1, (leftEdge.strength + rightEdge.strength) / 120);
+        const strengthFactor = Math.min(1, (leftEdge.strength + rightEdge.strength) / 250);
         const widthFactor = this.getWidthConfidenceFactor(bookWidth);
         const symmetryFactor = Math.max(0.1, 1 - Math.abs(leftEdge.strength - rightEdge.strength) / Math.max(leftEdge.strength, rightEdge.strength));
+        const sampleFactor = Math.min(1, (leftEdge.samples + rightEdge.samples) / 12);
         
-        return Math.min(0.9, strengthFactor * 0.5 + widthFactor * 0.3 + symmetryFactor * 0.2);
+        // Even stricter confidence calculation
+        const confidence = strengthFactor * 0.35 + widthFactor * 0.45 + symmetryFactor * 0.1 + sampleFactor * 0.1;
+        return Math.min(0.8, confidence);
     }
 
     getWidthConfidenceFactor(width) {
-        // Confidence based on typical book spine widths
-        if (width >= 15 && width <= 35) return 1.0;  // Optimal book spine width
-        if (width >= 10 && width <= 45) return 0.8;  // Good book spine width
-        if (width >= 8 && width <= 60) return 0.6;   // Acceptable book spine width
-        return 0.2; // Unlikely book spine width
+        // Much stricter confidence based on realistic book spine widths
+        if (width >= 18 && width <= 32) return 1.0;  // Optimal book spine width
+        if (width >= 15 && width <= 40) return 0.7;  // Good book spine width
+        if (width >= 12 && width <= 45) return 0.4;  // Marginal book spine width
+        return 0.1; // Very unlikely book spine width
     }
 
     getSymmetryFactor(leftLine, rightLine) {
