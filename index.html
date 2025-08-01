@@ -671,25 +671,108 @@
             const width = imageData.width;
             const height = imageData.height;
             
-            // Convert to grayscale for processing
-            const grayscale = new Uint8Array(width * height);
-            for (let i = 0; i < data.length; i += 4) {
-                const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-                grayscale[i / 4] = gray;
-            }
+            // US Standard Book Dimensions (in pixels, estimated)
+            const BOOK_STANDARDS = {
+                massMarket: { width: 25, height: 40 },    // 4.25" × 6.87"
+                trade: { width: 35, height: 52 },         // 6" × 9"  
+                hardcover: { width: 38, height: 52 }      // 6" × 9" typical
+            };
             
-            // Step 1: Detect horizontal shelf boundaries using Hough transform
-            const horizontalLines = detectHorizontalLinesHough(grayscale, width, height);
-            const shelfRegions = createShelfRegions(horizontalLines, width, height);
+            // Simple rectangular region detection
+            const bookRegions = detectSimpleBookRegions(imageData, BOOK_STANDARDS);
             
-            // Step 2: For each shelf, detect vertical book boundaries
-            shelfRegions.forEach((shelf, shelfIndex) => {
-                const verticalLines = detectVerticalLinesInRegion(grayscale, width, height, shelf);
-                const shelfBooks = createBooksFromVerticalLines(verticalLines, shelf, shelfIndex);
-                books.push(...shelfBooks);
+            // Convert to book objects with physics properties
+            bookRegions.forEach((region, index) => {
+                books.push({
+                    id: `book_${index}`,
+                    x: region.x,
+                    y: region.y,
+                    width: region.width,
+                    height: region.height,
+                    confidence: region.confidence,
+                    title: `Book ${index + 1}`,
+                    isReal: true,
+                    spineArea: region.width * region.height,
+                    // Physics properties for spatial optimization
+                    estimatedThickness: region.width * 0.6, // Spine width ≈ thickness
+                    canRotate: region.height < region.width * 3, // Short books can rotate
+                    canStack: region.height > 100 && region.width < 30, // Tall thin books can stack
+                    volumeEfficiency: calculateVolumeEfficiency(region)
+                });
             });
             
             return books;
+        }
+
+        function findBookLikeRegion(data, width, height, startX, startY, bookStandards) {
+            // Simple rectangular region detection using color consistency
+            const samplePixel = (x, y) => {
+                const idx = (y * width + x) * 4;
+                return {
+                    r: data[idx], 
+                    g: data[idx + 1], 
+                    b: data[idx + 2]
+                };
+            };
+            
+            const startColor = samplePixel(startX, startY);
+            
+            // Test different book sizes against this starting point
+            for (const [type, dims] of Object.entries(bookStandards)) {
+                const testWidth = dims.width + Math.random() * 20 - 10; // ±10px variation
+                const testHeight = dims.height + Math.random() * 30 - 15; // ±15px variation
+                
+                if (startX + testWidth >= width || startY + testHeight >= height) continue;
+                
+                // Check if this rectangular region has consistent book-like properties
+                let colorConsistency = 0;
+                let edgeScore = 0;
+                const samples = 12;
+                
+                for (let i = 0; i < samples; i++) {
+                    const x = startX + (testWidth * i) / samples;
+                    const y = startY + (testHeight * 0.5); // Middle of potential book
+                    
+                    if (x < width && y < height) {
+                        const color = samplePixel(Math.floor(x), Math.floor(y));
+                        const colorDiff = Math.abs(color.r - startColor.r) + 
+                                        Math.abs(color.g - startColor.g) + 
+                                        Math.abs(color.b - startColor.b);
+                        
+                        if (colorDiff < 80) colorConsistency++; // Similar color = potential book spine
+                    }
+                }
+                
+                // Check for vertical edges (book boundaries)
+                const leftEdge = samplePixel(startX, startY + testHeight/2);
+                const rightEdge = samplePixel(startX + testWidth, startY + testHeight/2);
+                edgeScore = Math.abs(leftEdge.r - rightEdge.r) + 
+                           Math.abs(leftEdge.g - rightEdge.g) + 
+                           Math.abs(leftEdge.b - rightEdge.b);
+                
+                const confidence = (colorConsistency / samples) * 0.7 + (edgeScore / 255) * 0.3;
+                
+                if (confidence > 0.3) {
+                    return {
+                        x: startX,
+                        y: startY,
+                        width: Math.round(testWidth),
+                        height: Math.round(testHeight),
+                        confidence: Math.min(0.95, confidence),
+                        type: type
+                    };
+                }
+            }
+            
+            return null;
+        }
+
+        function calculateVolumeEfficiency(region) {
+            // Simple physics: how efficiently is this book using shelf space?
+            const aspectRatio = region.height / region.width;
+            const idealRatio = 2.5; // Typical book ratio
+            const ratioEfficiency = 1 - Math.abs(aspectRatio - idealRatio) / idealRatio;
+            return Math.max(0.1, ratioEfficiency);
         }
 
         function detectVerticalEdges(grayscale, width, height) {
@@ -821,40 +904,36 @@
             return merged;
         }
 
-        function detectHorizontalLinesHough(grayscale, width, height) {
-            const lines = [];
-            const threshold = 40; // Minimum vote threshold
+        function detectSimpleBookRegions(imageData, bookStandards) {
+            const regions = [];
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
             
-            // Create accumulator for horizontal lines (theta around 0)
-            const accumulator = {};
+            // Simple grid-based sampling approach
+            const sampleSize = 8; // Check every 8th pixel for performance
+            const visited = new Set();
             
-            // Apply simplified edge detection first
-            const edges = applyCanny(grayscale, width, height);
-            
-            // Hough transform for horizontal lines
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    if (edges[y * width + x] > 100) { // Edge pixel
-                        // Check horizontal orientations (0° ± 10°)
-                        for (let thetaOffset = -10; thetaOffset <= 10; thetaOffset++) {
-                            const theta = thetaOffset * Math.PI / 180;
-                            const rho = Math.round(x * Math.cos(theta) + y * Math.sin(theta));
-                            const key = `${rho}_${thetaOffset}`;
-                            accumulator[key] = (accumulator[key] || 0) + 1;
+            for (let y = 0; y < height - 20; y += sampleSize) {
+                for (let x = 0; x < width - 20; x += sampleSize) {
+                    const key = `${x}_${y}`;
+                    if (!visited.has(key)) {
+                        const region = findBookLikeRegion(data, width, height, x, y, bookStandards);
+                        if (region && region.confidence > 0.3) {
+                            regions.push(region);
+                            
+                            // Mark area as visited to avoid overlaps
+                            for (let vy = region.y; vy < region.y + region.height; vy += 4) {
+                                for (let vx = region.x; vx < region.x + region.width; vx += 4) {
+                                    visited.add(`${vx}_${vy}`);
+                                }
+                            }
                         }
                     }
                 }
             }
             
-            // Find peaks in accumulator
-            Object.entries(accumulator).forEach(([key, votes]) => {
-                if (votes > threshold) {
-                    const [rho, theta] = key.split('_').map(Number);
-                    lines.push({ rho: parseInt(rho), theta: theta * Math.PI / 180, votes });
-                }
-            });
-            
-            return lines.sort((a, b) => b.votes - a.votes).slice(0, 5); // Top 5 lines
+            return regions;
         }
 
         function applyCanny(grayscale, width, height) {
@@ -1099,52 +1178,43 @@
         function generateRealOptimizationSuggestions(shelves) {
             arSuggestions = [];
             
-            shelves.forEach((shelf, shelfIndex) => {
-                const shelfBooks = stableBooks.filter(book => book.shelfIndex === shelfIndex);
-                if (shelfBooks.length === 0) return;
+            stableBooks.forEach(book => {
+                let suggestionType, suggestionText, efficiency;
                 
-                // Calculate space utilization for this shelf
-                const totalBookWidth = shelfBooks.reduce((sum, book) => sum + book.width, 0);
-                const spaceUtilization = totalBookWidth / shelf.width;
+                // Physics-based spatial optimization using book properties
+                if (book.canRotate && book.volumeEfficiency < 0.6) {
+                    suggestionType = 'rotate';
+                    suggestionText = '↻ Rotate horizontally';
+                    efficiency = '+' + Math.round((1 - book.volumeEfficiency) * 20) + '% space';
+                } else if (book.canStack) {
+                    suggestionType = 'stack';
+                    suggestionText = '⚏ Stack on back';
+                    efficiency = '+' + Math.round(book.estimatedThickness * 0.5) + '% efficiency';
+                } else if (book.width > 40) {
+                    suggestionType = 'rearrange';
+                    suggestionText = '↔ Face out';
+                    efficiency = '+' + Math.round(book.width * 0.3) + '% visibility';
+                } else {
+                    suggestionType = 'group';
+                    suggestionText = '□ Group similar';
+                    efficiency = '+10% organization';
+                }
                 
-                shelfBooks.forEach(book => {
-                    let suggestionType, suggestionText, efficiency;
-                    
-                    // Analyze each book for optimization opportunities
-                    if (book.height < 150 && spaceUtilization > 0.8) {
-                        suggestionType = 'rotate';
-                        suggestionText = '↻ Rotate horizontally';
-                        efficiency = '+12% space';
-                    } else if (book.width < 25 && book.height > 180) {
-                        suggestionType = 'stack';
-                        suggestionText = '⚏ Stack on back';
-                        efficiency = '+8% efficiency';
-                    } else if (spaceUtilization < 0.6) {
-                        suggestionType = 'group';
-                        suggestionText = '□ Group with similar';
-                        efficiency = '+15% organization';
-                    } else {
-                        suggestionType = 'rearrange';
-                        suggestionText = '↔ Optimize position';
-                        efficiency = '+6% space';
-                    }
-                    
-                    // Create suggestion with real data
-                    const suggestion = {
-                        x: book.x + book.width + 15,
-                        y: book.y + book.height / 2,
-                        type: suggestionType,
-                        text: suggestionText,
-                        book: book,
-                        efficiency: efficiency,
-                        shelfIndex: shelfIndex,
-                        stable: true
-                    };
-                    
-                    if (suggestion.x + 150 < canvas.width) {
-                        arSuggestions.push(suggestion);
-                    }
-                });
+                // Create suggestion positioned relative to book
+                const suggestion = {
+                    x: book.x + book.width + 10,
+                    y: book.y + book.height / 2,
+                    type: suggestionType,
+                    text: suggestionText,
+                    book: book,
+                    efficiency: efficiency,
+                    stable: true
+                };
+                
+                // Only show if it fits on screen
+                if (suggestion.x + 120 < canvas.width) {
+                    arSuggestions.push(suggestion);
+                }
             });
         }
 
