@@ -485,7 +485,9 @@
         let animationFrame;
         let frameCount = 0;
         let lastUpdateTime = 0;
-        const UPDATE_INTERVAL = 500; // Update every 500ms instead of every frame
+        const UPDATE_INTERVAL = 300; // Faster updates for better stability
+        let detectionHistory = []; // Track detection history for stability
+        const HISTORY_SIZE = 5; // Number of frames to track
 
         // AR suggestion types with colors and actions
         const suggestionTypes = {
@@ -684,7 +686,7 @@
             
             // Convert regions to book objects with realistic dimensions
             spineRegions.forEach((region, index) => {
-                if (region.width > 15 && region.height > 80) { // Minimum book size
+                if (region.width > 8 && region.height > 60) { // More lenient book size requirements
                     books.push({
                         id: `real_book_${index}`,
                         x: region.x,
@@ -718,7 +720,7 @@
                         }
                     }
                     
-                    edges[y * width + x] = Math.min(255, Math.abs(gx) / 4);
+                    edges[y * width + x] = Math.min(255, Math.abs(gx) / 3); // More sensitive edge detection
                 }
             }
             
@@ -728,7 +730,7 @@
         function findBookSpineRegions(edges, width, height) {
             const regions = [];
             const visited = new Set();
-            const threshold = 30; // Edge strength threshold
+            const threshold = 18; // Lower threshold for better sensitivity
             
             // Find connected regions of vertical edges
             for (let y = 0; y < height; y++) {
@@ -738,7 +740,7 @@
                     if (edges[idx] > threshold && !visited.has(idx)) {
                         const region = floodFillRegion(edges, width, height, x, y, threshold, visited);
                         
-                        if (region.pixels.length > 100) { // Minimum region size
+                        if (region.pixels.length > 50) { // Smaller minimum region size
                             regions.push({
                                 x: region.minX,
                                 y: region.minY,
@@ -791,7 +793,7 @@
 
         function mergeNearbyRegions(regions) {
             const merged = [];
-            const mergeDistance = 30; // Pixels
+            const mergeDistance = 20; // Reduced merge distance to avoid combining separate books
             
             regions.forEach(region => {
                 let foundMerge = false;
@@ -974,27 +976,74 @@
         }
 
         function stabilizeBookPositions(newBooks, oldBooks) {
-            const stabilized = [];
-            const stabilityFactor = 0.7; // Higher = more stable, lower = more responsive
+            // Add current detection to history
+            detectionHistory.push(newBooks.length);
+            if (detectionHistory.length > HISTORY_SIZE) {
+                detectionHistory.shift();
+            }
             
-            newBooks.forEach((newBook, i) => {
-                if (oldBooks[i]) {
-                    // Smooth the position changes to reduce jitter
-                    const oldBook = oldBooks[i];
+            // Calculate consensus count from history
+            const avgCount = Math.round(detectionHistory.reduce((a, b) => a + b, 0) / detectionHistory.length);
+            
+            const stabilized = [];
+            const stabilityFactor = 0.6; // More responsive for better tracking
+            
+            // Match new books with old books based on proximity
+            const usedOldBooks = new Set();
+            
+            newBooks.forEach((newBook) => {
+                let bestMatch = null;
+                let bestDistance = Infinity;
+                
+                // Find closest existing book
+                oldBooks.forEach((oldBook, idx) => {
+                    if (usedOldBooks.has(idx)) return;
+                    
+                    const distance = Math.sqrt(
+                        Math.pow(newBook.x - oldBook.x, 2) + 
+                        Math.pow(newBook.y - oldBook.y, 2)
+                    );
+                    
+                    if (distance < bestDistance && distance < 50) {
+                        bestDistance = distance;
+                        bestMatch = { book: oldBook, index: idx };
+                    }
+                });
+                
+                if (bestMatch) {
+                    usedOldBooks.add(bestMatch.index);
+                    // Smooth transition from old to new position
                     stabilized.push({
                         ...newBook,
-                        x: oldBook.x * stabilityFactor + newBook.x * (1 - stabilityFactor),
-                        y: oldBook.y * stabilityFactor + newBook.y * (1 - stabilityFactor),
-                        width: oldBook.width * stabilityFactor + newBook.width * (1 - stabilityFactor),
-                        height: oldBook.height * stabilityFactor + newBook.height * (1 - stabilityFactor),
-                        confidence: oldBook.confidence * 0.9 + newBook.confidence * 0.1
+                        x: bestMatch.book.x * stabilityFactor + newBook.x * (1 - stabilityFactor),
+                        y: bestMatch.book.y * stabilityFactor + newBook.y * (1 - stabilityFactor),
+                        width: bestMatch.book.width * stabilityFactor + newBook.width * (1 - stabilityFactor),
+                        height: bestMatch.book.height * stabilityFactor + newBook.height * (1 - stabilityFactor),
+                        confidence: Math.max(bestMatch.book.confidence * 0.8 + newBook.confidence * 0.2, 0.3),
+                        stable: true
                     });
                 } else {
-                    stabilized.push(newBook);
+                    // New book detected
+                    stabilized.push({
+                        ...newBook,
+                        stable: false,
+                        confidence: Math.max(newBook.confidence, 0.3)
+                    });
                 }
             });
             
-            return stabilized;
+            // Keep persistent books that weren't matched (brief disappearance tolerance)
+            oldBooks.forEach((oldBook, idx) => {
+                if (!usedOldBooks.has(idx) && oldBook.stable && oldBook.confidence > 0.2) {
+                    stabilized.push({
+                        ...oldBook,
+                        confidence: oldBook.confidence * 0.9, // Gradually fade confidence
+                        stable: oldBook.confidence > 0.3
+                    });
+                }
+            });
+            
+            return stabilized.filter(book => book.confidence > 0.15); // Remove very low confidence detections
         }
 
         function drawStableOverlays() {
